@@ -236,7 +236,7 @@ impl SecTrust {
 
     /// Evaluates trust. Requires macOS 10.14 or iOS, otherwise it just calls `evaluate()`
     pub fn evaluate_with_error(&self) -> Result<(), CFError> {
-        #[cfg(any(feature = "OSX_10_14", target_os = "ios"))]
+        #[cfg(feature = "OSX_10_14")]
         unsafe {
             let mut error: CFErrorRef = ::std::ptr::null_mut();
             if !SecTrustEvaluateWithError(self.0, &mut error) {
@@ -246,7 +246,7 @@ impl SecTrust {
             }
             Ok(())
         }
-        #[cfg(not(any(feature = "OSX_10_14", target_os = "ios")))]
+        #[cfg(any(not(feature = "OSX_10_14"), target_os = "ios"))]
         #[allow(deprecated)]
         {
             use security_framework_sys::base::errSecNotTrusted;
@@ -284,6 +284,19 @@ impl SecTrust {
                 Some(SecCertificate::wrap_under_get_rule(certificate as *mut _))
             }
         }
+    }
+
+    pub fn certificate_trust_chain_for_server_trust(&self) -> Vec<SecCertificate> {
+        let count = self.certificate_count();
+        let  mut cers = Vec::with_capacity(count as _);
+        for ix in 0..count {
+            #[allow(deprecated)]
+            unsafe {
+                let certificate = SecTrustGetCertificateAtIndex(self.0, ix);
+                cers.push(SecCertificate::wrap_under_get_rule(certificate as *mut _));
+            }            
+        }
+        cers
     }
 }
 

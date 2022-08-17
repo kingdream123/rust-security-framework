@@ -133,6 +133,13 @@ impl SslConnectionType {
     pub const DATAGRAM: Self = Self(kSSLDatagramType);
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SSLPinningMode {
+    None,
+    PublicKey,
+    Certificate,
+}
+
 /// An error or intermediate state after a TLS handshake attempt.
 #[derive(Debug)]
 pub enum HandshakeError<S> {
@@ -239,6 +246,7 @@ pub struct MidHandshakeClientBuilder<S> {
     certs: Vec<SecCertificate>,
     trust_certs_only: bool,
     danger_accept_invalid_certs: bool,
+    ssl_pinning_mode: SSLPinningMode,
 }
 
 impl<S> MidHandshakeClientBuilder<S> {
@@ -268,6 +276,7 @@ impl<S> MidHandshakeClientBuilder<S> {
             certs,
             trust_certs_only,
             danger_accept_invalid_certs,
+            ssl_pinning_mode,
         } = self;
 
         let mut result = stream.handshake();
@@ -287,15 +296,12 @@ impl<S> MidHandshakeClientBuilder<S> {
                     certs,
                     trust_certs_only,
                     danger_accept_invalid_certs,
+                    ssl_pinning_mode
                 };
                 return Err(ClientHandshakeError::Interrupted(ret));
             }
 
             if stream.server_auth_completed() {
-                if danger_accept_invalid_certs {
-                    result = stream.handshake();
-                    continue;
-                }
                 let mut trust = match stream.context().peer_trust2()? {
                     Some(trust) => trust,
                     None => {
@@ -303,17 +309,74 @@ impl<S> MidHandshakeClientBuilder<S> {
                         continue;
                     }
                 };
-                trust.set_anchor_certificates(&certs)?;
-                trust.set_trust_anchor_certificates_only(self.trust_certs_only)?;
                 let policy = SecPolicy::create_ssl(SslProtocolSide::SERVER, domain.as_deref());
                 trust.set_policy(&policy)?;
-                trust.evaluate_with_error().map_err(|error| {
-                    #[cfg(feature = "log")]
-                    log::warn!("SecTrustEvaluateWithError: {}", error.to_string());
-                    Error::from_code(error.code() as _)
-                })?;
-                result = stream.handshake();
-                continue;
+
+                if ssl_pinning_mode == SSLPinningMode::None {
+                    if danger_accept_invalid_certs || trust.evaluate_with_error().is_ok() {
+                        result = stream.handshake();
+                        continue;
+                    }
+                } else if !danger_accept_invalid_certs {
+                    trust.evaluate_with_error().map_err(|error| {
+                        Error::from_code(error.code() as _)
+                    })?;
+                }
+
+                match ssl_pinning_mode {
+                    SSLPinningMode::Certificate => {
+                        trust.set_anchor_certificates(&certs)?;
+                        trust.evaluate_with_error().map_err(|error| {
+                            Error::from_code(error.code() as _)
+                        })?;
+
+                        let certs_der = certs.iter().map(|c| c.to_der()).collect::<Vec<_>>();
+                        let server_cer = trust.certificate_trust_chain_for_server_trust();
+                        let mut has = false;
+                        for sc in server_cer {
+                            let sc_der = sc.to_der();
+                            if certs_der.contains(&sc_der) {
+                                has = true;
+                                continue;
+                            }
+                        }
+                        if has {
+                            result = stream.handshake();
+                            continue;
+                        }
+                    }
+                    SSLPinningMode::PublicKey => {
+
+                    }
+                    _ => {
+
+                    }
+                }
+                
+
+
+                // if danger_accept_invalid_certs {
+                //     result = stream.handshake();
+                //     continue;
+                // }
+                // let mut trust = match stream.context().peer_trust2()? {
+                //     Some(trust) => trust,
+                //     None => {
+                //         result = stream.handshake();
+                //         continue;
+                //     }
+                // };
+                // trust.set_anchor_certificates(&certs)?;
+                // trust.set_trust_anchor_certificates_only(self.trust_certs_only)?;
+                // let policy = SecPolicy::create_ssl(SslProtocolSide::SERVER, domain.as_deref());
+                // trust.set_policy(&policy)?;
+                // trust.evaluate_with_error().map_err(|error| {
+                //     #[cfg(feature = "log")]
+                //     log::warn!("SecTrustEvaluateWithError: {}", error.to_string());
+                //     Error::from_code(error.code() as _)
+                // })?;
+                // result = stream.handshake();
+                // continue;
             }
 
             let err = Error::from_code(stream.error().code());
@@ -1192,6 +1255,7 @@ pub struct ClientBuilder {
     alpn: Option<Vec<String>>,
     #[cfg(feature = "session-tickets")]
     enable_session_tickets: bool,
+    ssl_pinning_mode: SSLPinningMode,
 }
 
 impl Default for ClientBuilder {
@@ -1221,6 +1285,7 @@ impl ClientBuilder {
             alpn: None,
             #[cfg(feature = "session-tickets")]
             enable_session_tickets: false,
+            ssl_pinning_mode: SSLPinningMode::Certificate
         }
     }
 
@@ -1364,6 +1429,7 @@ impl ClientBuilder {
             certs,
             trust_certs_only: self.trust_certs_only,
             danger_accept_invalid_certs: self.danger_accept_invalid_certs,
+            ssl_pinning_mode: self.ssl_pinning_mode,
         };
         stream.handshake()
     }
