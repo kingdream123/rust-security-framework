@@ -286,6 +286,10 @@ impl SecTrust {
         }
     }
 
+
+    /// Returns a specific certificate from the certificate chain used to evaluate trust.
+    ///
+    /// Note: evaluate must first be called on the SecTrust. 
     pub fn certificate_trust_chain_for_server_trust(&self) -> Vec<SecCertificate> {
         let count = self.certificate_count();
         let  mut cers = Vec::with_capacity(count as _);
@@ -300,12 +304,12 @@ impl SecTrust {
     }
 }
 
-#[cfg(not(any(feature = "OSX_10_14", target_os = "ios")))]
+#[cfg(any(not(feature = "OSX_10_14"), target_os = "ios"))]
 extern "C" {
     fn CFErrorCreate(allocator: core_foundation_sys::base::CFAllocatorRef, domain: core_foundation_sys::string::CFStringRef, code: CFIndex, userInfo: core_foundation_sys::dictionary::CFDictionaryRef) -> CFErrorRef;
 }
 
-#[cfg(not(any(feature = "OSX_10_14", target_os = "ios")))]
+#[cfg(any(not(feature = "OSX_10_14"), target_os = "ios"))]
 fn cferror_from_osstatus(code: core_foundation_sys::base::OSStatus) -> CFError {
     unsafe {
         let error = CFErrorCreate(ptr::null_mut(), core_foundation_sys::error::kCFErrorDomainOSStatus, code as _, ptr::null_mut());

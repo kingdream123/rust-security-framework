@@ -136,7 +136,6 @@ impl SslConnectionType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SSLPinningMode {
     None,
-    PublicKey,
     Certificate,
 }
 
@@ -309,7 +308,10 @@ impl<S> MidHandshakeClientBuilder<S> {
                         continue;
                     }
                 };
-                let policy = SecPolicy::create_ssl(SslProtocolSide::SERVER, domain.as_deref());
+                let policy = match domain {
+                    Some(_) => SecPolicy::create_ssl(SslProtocolSide::SERVER, domain.as_deref()),
+                    None => SecPolicy::create_x509(),
+                };
                 trust.set_policy(&policy)?;
 
                 if ssl_pinning_mode == SSLPinningMode::None {
@@ -337,7 +339,7 @@ impl<S> MidHandshakeClientBuilder<S> {
                             let sc_der = sc.to_der();
                             if certs_der.contains(&sc_der) {
                                 has = true;
-                                continue;
+                                break;
                             }
                         }
                         if has {
@@ -345,38 +347,8 @@ impl<S> MidHandshakeClientBuilder<S> {
                             continue;
                         }
                     }
-                    SSLPinningMode::PublicKey => {
-
-                    }
-                    _ => {
-
-                    }
+                    _ => {}
                 }
-                
-
-
-                // if danger_accept_invalid_certs {
-                //     result = stream.handshake();
-                //     continue;
-                // }
-                // let mut trust = match stream.context().peer_trust2()? {
-                //     Some(trust) => trust,
-                //     None => {
-                //         result = stream.handshake();
-                //         continue;
-                //     }
-                // };
-                // trust.set_anchor_certificates(&certs)?;
-                // trust.set_trust_anchor_certificates_only(self.trust_certs_only)?;
-                // let policy = SecPolicy::create_ssl(SslProtocolSide::SERVER, domain.as_deref());
-                // trust.set_policy(&policy)?;
-                // trust.evaluate_with_error().map_err(|error| {
-                //     #[cfg(feature = "log")]
-                //     log::warn!("SecTrustEvaluateWithError: {}", error.to_string());
-                //     Error::from_code(error.code() as _)
-                // })?;
-                // result = stream.handshake();
-                // continue;
             }
 
             let err = Error::from_code(stream.error().code());
